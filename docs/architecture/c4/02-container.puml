@@ -1,0 +1,12 @@
+@startuml
+title Loan Management System - Containers
+
+actor "Loan Operations User" as User
+rectangle "Angular 22 Web App\nNginx, port 8080" as Web
+rectangle ".NET 10 REST API\nJWT, Problem Details, health checks" as Api
+database "SQL Server\nLoanManagement" as Db
+
+User --> Web : HTTPS
+Web --> Api : /api, JSON + Bearer token
+Api --> Db : EF Core / TDS
+@enduml

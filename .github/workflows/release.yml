@@ -1,0 +1,184 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: GitHub environment to deploy.
+        required: true
+        default: preview
+        type: choice
+        options:
+          - preview
+          - production
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+  attestations: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ inputs.environment }}
+  cancel-in-progress: false
+
+jobs:
+  backend-quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - run: dotnet restore backend/src/src.sln
+      - run: dotnet format backend/src/src.sln --verify-no-changes --no-restore
+      - run: dotnet build backend/src/src.sln --configuration Release --no-restore
+      - run: dotnet test backend/src/src.sln --configuration Release --no-build --collect:"XPlat Code Coverage"
+      - shell: pwsh
+        run: backend/src/coverage-gate.ps1 -SearchRoot backend/src -MinimumLineCoverage 90
+      - run: dotnet list backend/src/src.sln package --vulnerable --include-transitive
+
+  frontend-quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm test -- --watch=false --browsers=ChromeHeadless --code-coverage
+      - run: npm run build
+      - run: npm audit --audit-level=moderate
+
+  publish-images:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    needs: [backend-quality, frontend-quality]
+    outputs:
+      api-image: ${{ steps.images.outputs.api_image }}
+      frontend-image: ${{ steps.images.outputs.frontend_image }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compute image names
+        id: images
+        run: |
+          repository="$(echo "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')"
+          echo "api_image=ghcr.io/${repository}/api:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+          echo "frontend_image=ghcr.io/${repository}/frontend:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and publish API image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: backend/Dockerfile
+          push: true
+          tags: ${{ steps.images.outputs.api_image }}
+          sbom: true
+          provenance: true
+      - name: Build and publish frontend image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: frontend/Dockerfile
+          push: true
+          tags: ${{ steps.images.outputs.frontend_image }}
+          sbom: true
+          provenance: true
+
+  deploy-azure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: publish-images
+    environment:
+      name: ${{ inputs.environment }}
+      url: ${{ steps.deploy.outputs.frontend_url }}
+    env:
+      AZURE_RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+      AZURE_LOCATION: ${{ vars.AZURE_LOCATION }}
+      REGISTRY_PULL_USERNAME: ${{ vars.REGISTRY_PULL_USERNAME }}
+      REGISTRY_PULL_PASSWORD: ${{ secrets.REGISTRY_PULL_PASSWORD }}
+      SQL_ADMINISTRATOR_LOGIN: ${{ secrets.SQL_ADMINISTRATOR_LOGIN }}
+      SQL_ADMINISTRATOR_PASSWORD: ${{ secrets.SQL_ADMINISTRATOR_PASSWORD }}
+      JWT_SIGNING_KEY: ${{ secrets.JWT_SIGNING_KEY }}
+      APP_USERNAME: ${{ secrets.APP_USERNAME }}
+      APP_PASSWORD: ${{ secrets.APP_PASSWORD }}
+      APP_READONLY_USERNAME: ${{ vars.APP_READONLY_USERNAME }}
+      APP_READONLY_PASSWORD: ${{ secrets.APP_READONLY_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - name: Ensure resource group exists
+        run: |
+          az group create \
+            --name "$AZURE_RESOURCE_GROUP" \
+            --location "$AZURE_LOCATION"
+      - name: Deploy Azure infrastructure and images
+        id: deploy
+        run: |
+          deployment_name="fundo-${{ inputs.environment }}-${GITHUB_RUN_NUMBER}"
+          az deployment group create \
+            --name "$deployment_name" \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --template-file infra/azure/main.bicep \
+            --parameters environmentName="${{ inputs.environment }}" \
+            --parameters location="$AZURE_LOCATION" \
+            --parameters apiImage="${{ needs.publish-images.outputs.api-image }}" \
+            --parameters frontendImage="${{ needs.publish-images.outputs.frontend-image }}" \
+            --parameters containerRegistryServer="ghcr.io" \
+            --parameters containerRegistryUsername="$REGISTRY_PULL_USERNAME" \
+            --parameters containerRegistryPassword="$REGISTRY_PULL_PASSWORD" \
+            --parameters sqlAdministratorLogin="$SQL_ADMINISTRATOR_LOGIN" \
+            --parameters sqlAdministratorPassword="$SQL_ADMINISTRATOR_PASSWORD" \
+            --parameters jwtSigningKey="$JWT_SIGNING_KEY" \
+            --parameters appUsername="$APP_USERNAME" \
+            --parameters appPassword="$APP_PASSWORD" \
+            --parameters appReadOnlyUsername="$APP_READONLY_USERNAME" \
+            --parameters appReadOnlyPassword="$APP_READONLY_PASSWORD"
+          frontend_url="$(az deployment group show \
+            --name "$deployment_name" \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --query properties.outputs.frontendUrl.value \
+            --output tsv)"
+          echo "frontend_url=$frontend_url" >> "$GITHUB_OUTPUT"
+      - name: Smoke test deployed frontend
+        run: |
+          curl --fail --retry 10 --retry-delay 10 "${{ steps.deploy.outputs.frontend_url }}/health"
+      - name: Smoke test authenticated API path
+        run: |
+          curl --fail --silent \
+            --cookie-jar cookies.txt \
+            --header "Content-Type: application/json" \
+            --header "X-Requested-With: XMLHttpRequest" \
+            --data "{\"username\":\"$APP_USERNAME\",\"password\":\"$APP_PASSWORD\"}" \
+            "${{ steps.deploy.outputs.frontend_url }}/api/auth/session"
+          curl --fail --silent \
+            --cookie cookies.txt \
+            "${{ steps.deploy.outputs.frontend_url }}/api/loans?page=1&pageSize=1"
+      - name: Deployment summary
+        run: |
+          {
+            echo "## Azure deployment"
+            echo ""
+            echo "- Environment: ${{ inputs.environment }}"
+            echo "- API image: ${{ needs.publish-images.outputs.api-image }}"
+            echo "- Frontend image: ${{ needs.publish-images.outputs.frontend-image }}"
+            echo "- Frontend URL: ${{ steps.deploy.outputs.frontend_url }}"
+            echo "- Health and authenticated list smoke tests passed."
+            echo "- Database migrations must be run through the documented migration step before production traffic changes."
+          } >> "$GITHUB_STEP_SUMMARY"

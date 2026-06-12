@@ -1,0 +1,35 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Deployment.puml
+
+LAYOUT_WITH_LEGEND()
+
+title Loan Management System - Cloud Deployment
+
+Person(operator, "Loan Operator", "Uses the browser UI to manage loan applications.")
+
+Deployment_Node(github, "GitHub", "GitHub Actions + GHCR") {
+  Container(ci, "CI / Release workflows", "GitHub Actions", "Build, test, scan, publish images, deploy by OIDC and run smoke tests.")
+  Container(registry, "Container Registry", "GHCR", "Stores immutable API and frontend images tagged by Git SHA.")
+}
+
+Deployment_Node(azure, "Azure Subscription", "Preview or production resource group") {
+  Deployment_Node(containerApps, "Azure Container Apps Environment", "Managed runtime") {
+    Container(frontend, "Frontend Container App", "Angular + unprivileged Nginx", "Public HTTPS endpoint, security headers and same-origin /api proxy.")
+    Container(api, "API Container App", ".NET 10 ASP.NET Core", "Internal HTTPS endpoint with authentication, authorization, validation, Problem Details and health checks.")
+  }
+
+  ContainerDb(sql, "Azure SQL Database", "SQL Server", "Loans, seed data, constraints, indexes and rowversion concurrency.")
+  Container(keyVault, "Key Vault", "Managed secrets", "Database connection, JWT signing key and assessment credentials.")
+  Container(logs, "Log Analytics", "Azure Monitor", "Centralized application logs and platform diagnostics.")
+}
+
+Rel(operator, frontend, "Uses", "HTTPS")
+Rel(ci, registry, "Publishes API and frontend images", "OIDC/GITHUB_TOKEN")
+Rel(ci, azure, "Deploys infrastructure and revisions", "Azure OIDC")
+Rel(frontend, api, "Proxies /api requests", "HTTPS internal ingress")
+Rel(api, sql, "Reads and writes loans", "TLS")
+Rel(api, keyVault, "Reads secrets", "Managed identity")
+Rel(api, logs, "Writes logs and health signals", "Azure Monitor")
+Rel(frontend, logs, "Writes platform logs", "Azure Monitor")
+
+@enduml

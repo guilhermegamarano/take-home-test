@@ -44,14 +44,10 @@ project.assets.json
 *.pfx
 *.p12
 
-# Entity Framework Migrations
-migrations/
-
-# --- ANGULAR / TypeScript ---
+# --- Angular / TypeScript ---
 node_modules/
 dist/
 coverage/
-package-lock.json
 yarn.lock
 pnpm-lock.yaml
 .npmrc
@@ -61,7 +57,6 @@ pnpm-lock.yaml
 # IDEs and editors
 /.idea/
 /.vscode/
-/.editorconfig
 
 # Logs
 npm-debug.log*
@@ -80,8 +75,11 @@ out-tsc/
 .env.local
 .env.*.local
 
-# Tests
-karma.conf.js
+# Test artifacts
+TestResults/
 test-report/
 junit.xml
 mocha.json
+
+# Infrastructure build output
+infra/azure/main.json

@@ -1,0 +1,38 @@
+@startuml
+title Loan Management API - Components
+
+package "WebApi" {
+  [AuthenticationController]
+  [Authorization Policies]
+  [LoansController]
+  [ApiExceptionHandler]
+  [SqlServerHealthCheck]
+}
+
+package "Application" {
+  [LoanService]
+  [LoanProductCatalog]
+  interface ILoanRepository
+  interface IUnitOfWork
+}
+
+package "Domain" {
+  [Loan Aggregate]
+}
+
+package "Infrastructure" {
+  [LoanRepository]
+  [LoansDbContext]
+}
+
+[LoansController] --> [LoanService]
+[LoansController] --> [Authorization Policies]
+[LoanService] --> [Loan Aggregate]
+[LoanService] --> [LoanProductCatalog]
+[LoanService] --> ILoanRepository
+[LoanService] --> IUnitOfWork
+[LoanRepository] ..|> ILoanRepository
+[LoansDbContext] ..|> IUnitOfWork
+[LoanRepository] --> [LoansDbContext]
+[SqlServerHealthCheck] --> [LoansDbContext]
+@enduml

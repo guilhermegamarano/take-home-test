@@ -1,0 +1,48 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "environmentName": {
+      "value": "preview"
+    },
+    "apiImage": {
+      "value": "ghcr.io/owner/take-home-test/api:replace-with-sha"
+    },
+    "frontendImage": {
+      "value": "ghcr.io/owner/take-home-test/frontend:replace-with-sha"
+    },
+    "containerRegistryServer": {
+      "value": "ghcr.io"
+    },
+    "containerRegistryUsername": {
+      "value": "github-actor"
+    },
+    "containerRegistryPassword": {
+      "value": "set-through-github-environment-secret"
+    },
+    "sqlAdministratorLogin": {
+      "value": "sqladminuser"
+    },
+    "sqlAdministratorPassword": {
+      "value": "set-through-github-environment-secret"
+    },
+    "jwtSigningKey": {
+      "value": "set-through-github-environment-secret"
+    },
+    "appUsername": {
+      "value": "reviewer"
+    },
+    "appPassword": {
+      "value": "set-through-github-environment-secret"
+    },
+    "appReadOnlyUsername": {
+      "value": "auditor"
+    },
+    "appReadOnlyPassword": {
+      "value": "set-through-github-environment-secret"
+    },
+    "corsAllowedOrigin": {
+      "value": ""
+    }
+  }
+}

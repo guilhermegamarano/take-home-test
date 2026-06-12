@@ -1,0 +1,15 @@
+@startuml
+title Loan Management System - System Context
+
+actor "Loan Operations User" as User
+rectangle "Loan Management System" as System
+rectangle "Identity Provider\n(future production integration)" as Identity
+
+User --> System : Signs in and reviews loans\nHTTPS/JSON
+System ..> Identity : Future OpenID Connect integration
+
+note right of System
+Stores loan amounts, balances,
+applicant names and statuses.
+end note
+@enduml

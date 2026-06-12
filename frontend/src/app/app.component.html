@@ -1,33 +1,309 @@
-<main class="loans">
-  <section class="loans--container">
-    <h1>Loan Management</h1>
-    <table mat-table [dataSource]="loans" class="mat-elevation-z8">
-      <ng-container matColumnDef="loanAmount">
-        <th mat-header-cell *matHeaderCellDef>Loan Amount</th>
-        <td mat-cell *matCellDef="let element">
-          {{ element.loanAmount | currency }}
-        </td>
-      </ng-container>
+<main class="page-shell">
+  <section class="loans-card" aria-labelledby="page-title">
+    <header class="page-header">
+      <div>
+        <p class="eyebrow">Fundo lending operations</p>
+        <h1 id="page-title">Loan Management</h1>
+        <p class="subtitle">Review the current loan portfolio and outstanding balances.</p>
+      </div>
 
-      <ng-container matColumnDef="currentBalance">
-        <th mat-header-cell *matHeaderCellDef>Current Balance</th>
-        <td mat-cell *matCellDef="let element">
-          {{ element.currentBalance | currency }}
-        </td>
-      </ng-container>
+      @if (authenticated()) {
+        <button mat-stroked-button type="button" (click)="logout()">Sign out</button>
+      }
+    </header>
 
-      <ng-container matColumnDef="applicant">
-        <th mat-header-cell *matHeaderCellDef>Applicant</th>
-        <td mat-cell *matCellDef="let element">{{ element.applicant }}</td>
-      </ng-container>
+    @if (!authenticated()) {
+      <form class="login-panel" (ngSubmit)="login()">
+        <h2>Sign in</h2>
+        <p>Use the API credentials configured for this environment.</p>
 
-      <ng-container matColumnDef="status">
-        <th mat-header-cell *matHeaderCellDef>Status</th>
-        <td mat-cell *matCellDef="let element">{{ element.status }}</td>
-      </ng-container>
+        <label for="username">Username</label>
+        <input
+          id="username"
+          name="username"
+          type="text"
+          autocomplete="username"
+          [(ngModel)]="username"
+        />
 
-      <tr mat-header-row *matHeaderRowDef="displayedColumns"></tr>
-      <tr mat-row *matRowDef="let row; columns: displayedColumns"></tr>
-    </table>
+        <label for="password">Password</label>
+        <input
+          id="password"
+          name="password"
+          type="password"
+          autocomplete="current-password"
+          [(ngModel)]="password"
+        />
+
+        <button mat-flat-button type="submit" [disabled]="loading()">
+          {{ loading() ? 'Signing in...' : 'Sign in' }}
+        </button>
+      </form>
+    } @else {
+      @if (loading()) {
+        <div class="state-panel" role="status">
+          <mat-spinner diameter="36"></mat-spinner>
+          <span>Loading loans...</span>
+        </div>
+      } @else if (loans().length === 0 && errorMessage() === null) {
+        <app-loan-filters
+          [filters]="filters"
+          [products]="loanProducts"
+          (apply)="applyFilters()"
+          (reset)="resetFilters()"
+        ></app-loan-filters>
+
+        @if (canWriteLoans()) {
+          <form class="command-panel" aria-label="Create loan" (ngSubmit)="createLoan()">
+            <h2>Create loan</h2>
+            <label>
+              Applicant
+              <input
+                name="loanApplicantEmpty"
+                type="text"
+                autocomplete="name"
+                [(ngModel)]="newLoan.applicantName"
+              />
+            </label>
+
+            <label>
+              Amount
+              <input
+                name="loanAmountEmpty"
+                type="number"
+                min="0.01"
+                step="0.01"
+                [(ngModel)]="newLoan.amount"
+              />
+            </label>
+
+            <label>
+              Product
+              <select name="loanTypeEmpty" [(ngModel)]="newLoan.type">
+                @for (product of loanProducts; track product.value) {
+                  <option [ngValue]="product.value">{{ product.label }}</option>
+                }
+              </select>
+            </label>
+
+            <button mat-flat-button type="submit" [disabled]="savingLoan()">
+              {{ savingLoan() ? 'Creating...' : 'Create loan' }}
+            </button>
+          </form>
+        }
+      } @else if (loans().length > 0) {
+        <app-loan-filters
+          [filters]="filters"
+          [products]="loanProducts"
+          (apply)="applyFilters()"
+          (reset)="resetFilters()"
+        ></app-loan-filters>
+
+        @if (canWriteLoans()) {
+          <form class="command-panel" aria-label="Create loan" (ngSubmit)="createLoan()">
+            <div>
+              <h2>Create loan</h2>
+              <p>Add a new loan using the same API contract that external clients use.</p>
+            </div>
+
+            <label>
+              Applicant
+              <input
+                name="loanApplicant"
+                type="text"
+                autocomplete="name"
+                [(ngModel)]="newLoan.applicantName"
+              />
+            </label>
+
+            <label>
+              Amount
+              <input
+                name="loanAmount"
+                type="number"
+                min="0.01"
+                step="0.01"
+                [(ngModel)]="newLoan.amount"
+              />
+            </label>
+
+            <label>
+              Product
+              <select name="loanType" [(ngModel)]="newLoan.type">
+                @for (product of loanProducts; track product.value) {
+                  <option [ngValue]="product.value">{{ product.label }}</option>
+                }
+              </select>
+            </label>
+
+            <button mat-flat-button type="submit" [disabled]="savingLoan()">
+              {{ savingLoan() ? 'Creating...' : 'Create loan' }}
+            </button>
+          </form>
+        }
+
+        <section class="summary-grid" aria-label="Portfolio summary">
+          <article class="summary-card">
+            <span>Outstanding balance</span>
+            <strong>{{ summary().outstandingBalance | currency }}</strong>
+            <small>Across active loans</small>
+          </article>
+          <article class="summary-card">
+            <span>Active loans</span>
+            <strong>{{ summary().activeLoans }}</strong>
+            <small>Need ongoing collection</small>
+          </article>
+          <article class="summary-card">
+            <span>Paid loans</span>
+            <strong>{{ summary().paidLoans }}</strong>
+            <small>Fully settled</small>
+          </article>
+          <article class="summary-card summary-card--attention">
+            <span>High exposure</span>
+            <strong>{{ summary().highExposureLoans }}</strong>
+            <small>Balances at or above $50,000</small>
+          </article>
+        </section>
+
+        <div class="table-frame">
+          <table mat-table [dataSource]="loans()">
+            <ng-container matColumnDef="amount">
+              <th mat-header-cell *matHeaderCellDef>Loan Amount</th>
+              <td mat-cell *matCellDef="let loan">{{ loan.amount | currency }}</td>
+            </ng-container>
+
+            <ng-container matColumnDef="currentBalance">
+              <th mat-header-cell *matHeaderCellDef>Current Balance</th>
+              <td mat-cell *matCellDef="let loan">
+                <div class="balance-cell">
+                  <span>{{ loan.currentBalance | currency }}</span>
+                  <span class="balance-track" aria-hidden="true">
+                    <span
+                      class="balance-fill"
+                      [style.width.%]="paidPercentage(loan)"
+                    ></span>
+                  </span>
+                  <small>{{ paidPercentage(loan) }}% paid</small>
+                </div>
+              </td>
+            </ng-container>
+
+            <ng-container matColumnDef="type">
+              <th mat-header-cell *matHeaderCellDef>Product</th>
+              <td mat-cell *matCellDef="let loan">
+                <span class="product">{{ productLabel(loan.type) }}</span>
+              </td>
+            </ng-container>
+
+            <ng-container matColumnDef="applicantName">
+              <th mat-header-cell *matHeaderCellDef>Applicant</th>
+              <td mat-cell *matCellDef="let loan">{{ loan.applicantName }}</td>
+            </ng-container>
+
+            <ng-container matColumnDef="status">
+              <th mat-header-cell *matHeaderCellDef>Status</th>
+              <td mat-cell *matCellDef="let loan">
+                <span class="status" [class.status--paid]="loan.status === 'paid'">
+                  {{ loan.status }}
+                </span>
+              </td>
+            </ng-container>
+
+            <ng-container matColumnDef="payment">
+              <th mat-header-cell *matHeaderCellDef>Payment</th>
+              <td mat-cell *matCellDef="let loan">
+                @if (loan.status === 'active' && canWriteLoans()) {
+                  <form class="payment-form" (ngSubmit)="makePayment(loan)">
+                    <label [for]="'payment-' + loan.id" class="visually-hidden">
+                      Payment amount for {{ loan.applicantName }}
+                    </label>
+                    <input
+                      [id]="'payment-' + loan.id"
+                      [name]="'payment-' + loan.id"
+                      type="number"
+                      min="0.01"
+                      step="0.01"
+                      placeholder="Amount"
+                      [(ngModel)]="paymentAmounts[loan.id]"
+                    />
+                    <button
+                      mat-stroked-button
+                      type="submit"
+                      [disabled]="savingPaymentId() === loan.id"
+                    >
+                      {{ savingPaymentId() === loan.id ? 'Saving...' : 'Pay' }}
+                    </button>
+                  </form>
+                } @else if (loan.status === 'paid') {
+                  <span class="settled">Settled</span>
+                } @else {
+                  <span class="settled">Read only</span>
+                }
+              </td>
+            </ng-container>
+
+            <ng-container matColumnDef="details">
+              <th mat-header-cell *matHeaderCellDef>Details</th>
+              <td mat-cell *matCellDef="let loan">
+                <button mat-stroked-button type="button" (click)="viewDetails(loan.id)">
+                  View
+                </button>
+              </td>
+            </ng-container>
+
+            <tr mat-header-row *matHeaderRowDef="displayedColumns"></tr>
+            <tr mat-row *matRowDef="let row; columns: displayedColumns"></tr>
+          </table>
+        </div>
+
+        @if (page(); as currentPage) {
+          <nav class="pagination-panel" aria-label="Loan list pagination">
+            <span>
+              Page {{ currentPage.page }} of {{ currentPage.totalPages || 1 }}
+              · {{ currentPage.totalItems }} loans
+            </span>
+            <div>
+              <button
+                mat-stroked-button
+                type="button"
+                [disabled]="currentPage.page <= 1"
+                (click)="changePage(-1)"
+              >
+                Previous
+              </button>
+              <button
+                mat-stroked-button
+                type="button"
+                [disabled]="currentPage.page >= currentPage.totalPages"
+                (click)="changePage(1)"
+              >
+                Next
+              </button>
+            </div>
+          </nav>
+        }
+
+        <app-loan-details-panel
+          [loan]="selectedLoan()"
+          [loading]="loadingDetails()"
+          (close)="selectedLoan.set(null)"
+        ></app-loan-details-panel>
+      }
+    }
+
+    @if (errorMessage(); as message) {
+      <div class="error-panel" role="alert">
+        <span>{{ message }}</span>
+        @if (authenticated()) {
+          <button mat-button type="button" (click)="loadLoans()">Try again</button>
+        }
+      </div>
+    }
+
+    @if (successMessage(); as message) {
+      <div class="success-panel" role="status">
+        <span>{{ message }}</span>
+      </div>
+    }
   </section>
 </main>
