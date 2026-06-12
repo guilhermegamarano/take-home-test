@@ -141,6 +141,12 @@ jobs:
       name: preview
     env:
       DEPLOY_TARGET_URL: ${{ secrets.DEPLOY_TARGET_URL }}
+      SQL_SERVER_PASSWORD: PreviewOnlyPassword!123
+      JWT_SIGNING_KEY: preview-only-signing-key-with-at-least-32-characters
+      APP_USERNAME: reviewer
+      APP_PASSWORD: preview-only-application-password
+      APP_READONLY_USERNAME: auditor
+      APP_READONLY_PASSWORD: preview-only-readonly-password
     steps:
       - uses: actions/checkout@v4
       - name: Render deployment manifest
